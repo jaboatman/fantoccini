@@ -3,7 +3,13 @@
 use crate::{error, Client, Locator};
 use serde::Serialize;
 use serde_json::Value as Json;
-use webdriver::command::{SendKeysParameters, SwitchToFrameParameters, WebDriverCommand};
+use webdriver::actions::{
+    ActionSequence, ActionsType, PointerAction, PointerActionItem, PointerActionParameters,
+    PointerMoveAction,
+};
+use webdriver::command::{
+    ActionsParameters, SendKeysParameters, SwitchToFrameParameters, WebDriverCommand,
+};
 use webdriver::common::FrameId;
 use webdriver::error::WebDriverError;
 
@@ -193,6 +199,40 @@ impl Element {
         } else {
             Err(error::CmdError::NotW3C(r))
         }
+    }
+
+    /// Simulates the mouse moving over this element.
+    pub async fn mouse_over(&mut self) -> Result<(), error::CmdError> {
+        let actions = PointerMoveAction {
+            duration: None,
+            origin: webdriver::actions::PointerOrigin::Element(self.element.clone()),
+            x: Some(0),
+            y: Some(0),
+        };
+
+        let action = PointerActionItem::Pointer(PointerAction::Move(actions));
+        // TODO (JAB): Can make this an argument.
+        let parameters = PointerActionParameters {
+            pointer_type: webdriver::actions::PointerType::Mouse,
+        };
+
+        let action = ActionsType::Pointer {
+            parameters,
+            actions: vec![action],
+        };
+
+        let action = ActionSequence {
+            id: "default mouse".to_string(),
+            actions: action,
+        };
+
+        let action = ActionsParameters {
+            actions: vec![action],
+        };
+
+        let cmd = WebDriverCommand::PerformActions(action);
+        self.client.issue(cmd).await?;
+        Ok(())
     }
 
     /// Clear this element.

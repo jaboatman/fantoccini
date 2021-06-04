@@ -508,6 +508,9 @@ where
             WebDriverCommand::GetActiveElement => base.join("element/active"),
             WebDriverCommand::DismissAlert => base.join("alert/dismiss"),
             WebDriverCommand::AcceptAlert => base.join("alert/accept"),
+            WebDriverCommand::PerformActions(_) | WebDriverCommand::ReleaseActions => {
+                base.join("actions")
+            }
             _ => unimplemented!(),
         }
     }
@@ -625,6 +628,13 @@ where
             WebDriverCommand::AcceptAlert | WebDriverCommand::DismissAlert => {
                 body = Some("{}".to_string());
                 method = Method::POST;
+            }
+            WebDriverCommand::PerformActions(ref actions) => {
+                body = Some(serde_json::to_string(actions).unwrap());
+                method = Method::POST;
+            }
+            WebDriverCommand::ReleaseActions => {
+                method = Method::DELETE;
             }
             _ => {}
         }
