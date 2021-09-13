@@ -295,5 +295,6 @@ mod client;
 pub use client::Client;
 
 pub mod cookies;
+pub mod direct;
 pub mod elements;
 pub mod user_prompts;
