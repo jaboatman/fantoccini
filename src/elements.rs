@@ -149,7 +149,12 @@ impl Element {
         }
     }
 
-    /// Retrieve the text contents of this elment.
+    /// Retrieve the text contents of this element as rendered on the page. This can result in
+    /// unexpected behavior when using inspection tools to find content on a page. For example, the
+    /// text of the node may be "Some Text", but due to CSS rules it may be rendered on the page as
+    /// "SOME TEXT". This function will return "SOME TEXT". Of note, this also means if CSS is used
+    /// to hide the element pointed to by `self` on the page, then this function will return the
+    /// empty string.
     ///
     /// See [13.5 Get Element Text](https://www.w3.org/TR/webdriver1/#get-element-text)
     /// of the WebDriver standard.

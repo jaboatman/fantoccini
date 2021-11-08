@@ -4,6 +4,7 @@ use std::fmt;
 use std::io::Error as IOError;
 use url::ParseError;
 use webdriver::error as wderror;
+pub use webdriver::error::ErrorStatus as WebDriverErrorStatus;
 
 /// An error occured while attempting to establish a session for a new `Client`.
 #[derive(Debug)]
@@ -167,9 +168,7 @@ impl Error for CmdError {
             CmdError::Lost(ref e) => Some(e),
             CmdError::Json(ref e) => Some(e),
             CmdError::ImageDecodeError(ref e) => Some(e),
-            CmdError::NotJson(_)
-            | CmdError::NotW3C(_)
-            | CmdError::InvalidArgument(..) => None,
+            CmdError::NotJson(_) | CmdError::NotW3C(_) | CmdError::InvalidArgument(..) => None,
         }
     }
 }
