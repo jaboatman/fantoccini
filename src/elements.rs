@@ -278,6 +278,41 @@ impl Element {
             Err(error::CmdError::NotW3C(r))
         }
     }
+
+    /// Fetches the rectangle of the element. The returned values are the `x`, `y`, coordinates and
+    /// the `height` and `width` properties of the element in order.
+    ///
+    /// See [13.7 Get Element Rect](https://www.w3.org/TR/webdriver1/#get-element-rect) of the
+    /// WebDriver standard.
+    pub async fn get_element_rect(&mut self) -> Result<(u64, u64, u64, u64), error::CmdError> {
+        let cmd = WebDriverCommand::GetElementRect(self.element.clone());
+        match self.client.issue(cmd).await? {
+            Json::Object(mut obj) => {
+                let x = match obj.remove("x").and_then(|x| x.as_f64()) {
+                    Some(x) => x,
+                    None => return Err(error::CmdError::NotW3C(Json::Object(obj))),
+                };
+
+                let y = match obj.remove("y").and_then(|y| y.as_f64()) {
+                    Some(y) => y,
+                    None => return Err(error::CmdError::NotW3C(Json::Object(obj))),
+                };
+
+                let width = match obj.remove("width").and_then(|width| width.as_f64()) {
+                    Some(width) => width,
+                    None => return Err(error::CmdError::NotW3C(Json::Object(obj))),
+                };
+
+                let height = match obj.remove("height").and_then(|height| height.as_f64()) {
+                    Some(height) => height,
+                    None => return Err(error::CmdError::NotW3C(Json::Object(obj))),
+                };
+
+                Ok((x as u64, y as u64, width as u64, height as u64))
+            }
+            v => Err(error::CmdError::NotW3C(v)),
+        }
+    }
 }
 
 /// Higher-level operations.

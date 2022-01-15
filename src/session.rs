@@ -489,6 +489,8 @@ where
             WebDriverCommand::GetElementText(ref we) => {
                 base.join(&format!("element/{}/text", we.0))
             }
+            WebDriverCommand::GetElementRect(ref e) => base.join(&format!("element/{}/rect", e.0)),
+
             WebDriverCommand::ElementSendKeys(ref we, _) => {
                 base.join(&format!("element/{}/value", we.0))
             }
