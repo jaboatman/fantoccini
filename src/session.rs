@@ -306,10 +306,8 @@ where
                         return Ok(());
                     }
                     v.insert("sessionId".to_string(), session_id);
-                    Err(error::NewSessionError::NotW3C(Json::Object(v)))
-                } else {
-                    Err(error::NewSessionError::NotW3C(Json::Object(v)))
                 }
+                Err(error::NewSessionError::NotW3C(Json::Object(v)))
             }
             Ok(v) | Err(error::CmdError::NotW3C(v)) => Err(error::NewSessionError::NotW3C(v)),
             Err(error::CmdError::Failed(e)) => Err(error::NewSessionError::Failed(e)),
@@ -320,11 +318,22 @@ where
             Err(error::CmdError::Standard(
                 e
                 @
-                WebDriverError {
+                error::WebDriver {
                     error: ErrorStatus::SessionNotCreated,
                     ..
                 },
             )) => Err(error::NewSessionError::SessionNotCreated(e)),
+            Err(error::CmdError::Standard(
+                e
+                @
+                error::WebDriver {
+                    error: ErrorStatus::UnknownError,
+                    ..
+                },
+            )) => Err(error::NewSessionError::NotW3C(
+                serde_json::to_value(e)
+                    .expect("error::WebDriver should always be serializeable to JSON"),
+            )),
             Err(e) => {
                 panic!("unexpected webdriver error; {}", e);
             }
@@ -858,7 +867,9 @@ where
                 };
 
                 let message = body["message"].as_str().unwrap().to_string();
-                Err(error::CmdError::from(WebDriverError::new(es, message)))
+                Err(error::CmdError::from_webdriver_error(WebDriverError::new(
+                    es, message,
+                )))
             });
 
         Either::Left(f)

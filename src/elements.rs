@@ -1,15 +1,14 @@
 //! Types used to represent particular elements on a page.
 
-use crate::{error, Client, Locator};
+use crate::wd::Locator;
+use crate::{error, Client};
 use serde::Serialize;
 use serde_json::Value as Json;
 use webdriver::actions::{
     ActionSequence, ActionsType, PointerAction, PointerActionItem, PointerActionParameters,
     PointerMoveAction,
 };
-use webdriver::command::{
-    ActionsParameters, SendKeysParameters, SwitchToFrameParameters, WebDriverCommand,
-};
+use webdriver::command::{ActionsParameters, WebDriverCommand};
 use webdriver::common::FrameId;
 use webdriver::error::WebDriverError;
 
@@ -52,7 +51,7 @@ impl Element {
             mut client,
             element,
         } = self;
-        let params = SwitchToFrameParameters {
+        let params = webdriver::command::SwitchToFrameParameters {
             id: Some(FrameId::Element(element)),
         };
         client
@@ -75,7 +74,7 @@ impl Element {
             .client
             .issue(WebDriverCommand::FindElementElement(
                 self.element.clone(),
-                search.into(),
+                search.into_parameters(),
             ))
             .await?;
         let e = self.client.parse_lookup(res)?;
@@ -96,7 +95,7 @@ impl Element {
             .client
             .issue(WebDriverCommand::FindElementElements(
                 self.element.clone(),
-                search.into(),
+                search.into_parameters(),
             ))
             .await?;
         let array = self.client.parse_lookup_all(res)?;
@@ -267,7 +266,7 @@ impl Element {
     pub async fn send_keys(&mut self, text: &str) -> Result<(), error::CmdError> {
         let cmd = WebDriverCommand::ElementSendKeys(
             self.element.clone(),
-            SendKeysParameters {
+            webdriver::command::SendKeysParameters {
                 text: text.to_owned(),
             },
         );
@@ -331,7 +330,9 @@ impl Element {
                     webdriver::error::ErrorStatus::InvalidArgument,
                     "cannot follow element without href attribute",
                 );
-                return Err(error::CmdError::Standard(e));
+                return Err(error::CmdError::Standard(
+                    error::WebDriver::from_upstream_error(e),
+                ));
             }
             v => return Err(error::CmdError::NotW3C(v)),
         };
@@ -342,22 +343,18 @@ impl Element {
         Ok(self.client)
     }
 
-    /// Find and click an `option` child element by its `value` attribute.
-    pub async fn select_by_value(mut self, value: &str) -> Result<Client, error::CmdError> {
-        let locator = format!("option[value='{}']", value);
-        let locator = webdriver::command::LocatorParameters {
-            using: webdriver::common::LocatorStrategy::CSSSelector,
-            value: locator,
-        };
+    /// Find and click an `<option>` child element by a locator.
+    ///
+    /// This method clicks the first `<option>` element that is found.
+    /// If the element wasn't found, [`CmdError::NoSuchElement`](error::CmdError::NoSuchElement) will be issued.
+    pub async fn select_by(mut self, locator: Locator<'_>) -> Result<Client, error::CmdError> {
+        self.find(locator).await?.click().await
+    }
 
-        let cmd = WebDriverCommand::FindElementElement(self.element, locator);
-        let v = self.client.issue(cmd).await?;
-        Element {
-            element: self.client.parse_lookup(v)?,
-            client: self.client,
-        }
-        .click()
-        .await
+    /// Find and click an `option` child element by its `value` attribute.
+    pub async fn select_by_value(self, value: &str) -> Result<Client, error::CmdError> {
+        self.select_by(Locator::Css(&format!("option[value='{}']", value)))
+            .await
     }
 
     /// Find and click an `<option>` child element by its index.
@@ -370,10 +367,9 @@ impl Element {
     /// in the form, or if it there are stray `<option>` in the form.
     ///
     /// The indexing in this method is 0-based.
-    pub async fn select_by_index(mut self, index: usize) -> Result<Client, error::CmdError> {
-        let locator = format!("option:nth-of-type({})", index + 1);
-
-        self.find(Locator::Css(&locator)).await?.click().await
+    pub async fn select_by_index(self, index: usize) -> Result<Client, error::CmdError> {
+        self.select_by(Locator::Css(&format!("option:nth-of-type({})", index + 1)))
+            .await
     }
 
     /// Find and click an `<option>` element by its visible text.
@@ -382,9 +378,9 @@ impl Element {
     /// It also doesn't make any normalizations before match.
     ///
     /// [example]: https://github.com/SeleniumHQ/selenium/blob/941dc9c6b2e2aa4f701c1b72be8de03d4b7e996a/py/selenium/webdriver/support/select.py#L67
-    pub async fn select_by_label(mut self, label: &str) -> Result<Client, error::CmdError> {
-        let locator = format!(r".//option[.='{}']", label);
-        self.find(Locator::XPath(&locator)).await?.click().await
+    pub async fn select_by_label(self, label: &str) -> Result<Client, error::CmdError> {
+        self.select_by(Locator::XPath(&format!(r".//option[.='{}']", label)))
+            .await
     }
 }
 
@@ -402,7 +398,8 @@ impl Form {
         locator: Locator<'_>,
         value: &str,
     ) -> Result<Self, error::CmdError> {
-        let locator = WebDriverCommand::FindElementElement(self.form.clone(), locator.into());
+        let locator =
+            WebDriverCommand::FindElementElement(self.form.clone(), locator.into_parameters());
         let value = Json::from(value);
 
         let res = self.client.issue(locator).await?;
@@ -449,7 +446,7 @@ impl Form {
     ///
     /// `false` is returned if a matching button was not found.
     pub async fn submit_with(mut self, button: Locator<'_>) -> Result<Client, error::CmdError> {
-        let locator = WebDriverCommand::FindElementElement(self.form, button.into());
+        let locator = WebDriverCommand::FindElementElement(self.form, button.into_parameters());
         let res = self.client.issue(locator).await?;
         let submit = self.client.parse_lookup(res)?;
         let res = self

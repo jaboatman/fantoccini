@@ -69,7 +69,7 @@ async fn send_keys_and_clear_input_inner(mut c: Client) -> Result<(), error::Cmd
     c.goto("https://www.wikipedia.org/").await?;
 
     // find search input element
-    let mut e = c.wait_for_find(Locator::Id("searchInput")).await?;
+    let mut e = c.wait().for_element(Locator::Id("searchInput")).await?;
     e.send_keys("foobar").await?;
     assert_eq!(
         e.prop("value")
@@ -109,7 +109,7 @@ async fn raw_inner(mut c: Client) -> Result<(), error::CmdError> {
         .await?;
 
     // and voilla, we now have the bytes for the Wikipedia logo!
-    assert!(pixels.len() > 0);
+    assert!(!pixels.is_empty());
     println!("Wikipedia logo is {}b", pixels.len());
 
     c.close().await
@@ -222,6 +222,7 @@ async fn persist_inner(mut c: Client) -> Result<(), error::CmdError> {
 }
 
 async fn simple_wait_test(mut c: Client) -> Result<(), error::CmdError> {
+    #[allow(deprecated)]
     c.wait_for(move |_| {
         std::thread::sleep(Duration::from_secs(4));
         async move { Ok(true) }
@@ -241,6 +242,7 @@ async fn wait_for_navigation_test(mut c: Client) -> Result<(), error::CmdError> 
 
     c.goto(url.as_str()).await?;
 
+    #[allow(deprecated)]
     loop {
         let wait_for = c.wait_for_navigation(Some(url)).await;
         assert!(wait_for.is_ok());
@@ -258,10 +260,10 @@ async fn wait_for_navigation_test(mut c: Client) -> Result<(), error::CmdError> 
 
 // Verifies that basic cookie handling works
 async fn handle_cookies_test(mut c: Client) -> Result<(), error::CmdError> {
-    c.goto("https://google.com/").await?;
+    c.goto("https://www.wikipedia.org/").await?;
 
     let cookies = c.get_all_cookies().await?;
-    assert!(cookies.len() > 0);
+    assert!(!cookies.is_empty());
 
     let first_cookie = &cookies[0];
     assert_eq!(
@@ -275,7 +277,7 @@ async fn handle_cookies_test(mut c: Client) -> Result<(), error::CmdError> {
 
     c.delete_all_cookies().await?;
     let cookies = c.get_all_cookies().await?;
-    assert!(cookies.len() == 0);
+    assert!(dbg!(cookies).is_empty());
 
     c.close().await
 }

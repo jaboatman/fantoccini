@@ -1,14 +1,16 @@
+//! WebDriver client implementation.
+
 use crate::elements::{Element, Form};
+use crate::error;
 use crate::session::{Cmd, Session, Task};
-use crate::{error, Locator};
+use crate::wait::Wait;
+use crate::wd::{Capabilities, Locator, NewWindowType, WindowHandle};
 use hyper::{client::connect, Method};
 use serde_json::Value as Json;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto as _};
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot};
-use webdriver::command::{
-    NewWindowParameters, SwitchToFrameParameters, SwitchToWindowParameters, WebDriverCommand,
-};
+use webdriver::command::WebDriverCommand;
 use webdriver::common::{FrameId, ELEMENT_KEY};
 
 // Used only under `native-tls`
@@ -76,7 +78,7 @@ impl Client {
     /// Returns a future that resolves to a handle for issuing additional WebDriver tasks.
     pub async fn with_capabilities_and_connector<C>(
         webdriver: &str,
-        cap: &webdriver::capabilities::Capabilities,
+        cap: &Capabilities,
         connector: C,
     ) -> Result<Self, error::NewSessionError>
     where
@@ -207,10 +209,10 @@ impl Client {
     /// See [10.1 Get Window Handle](https://www.w3.org/TR/webdriver1/#get-window-handle) of the
     /// WebDriver standard.
     #[cfg_attr(docsrs, doc(alias = "Get Window Handle"))]
-    pub async fn window(&mut self) -> Result<webdriver::common::WebWindow, error::CmdError> {
+    pub async fn window(&mut self) -> Result<WindowHandle, error::CmdError> {
         let res = self.issue(WebDriverCommand::GetWindowHandle).await?;
         match res {
-            Json::String(x) => Ok(webdriver::common::WebWindow(x)),
+            Json::String(x) => Ok(x.try_into()?),
             v => Err(error::CmdError::NotW3C(v)),
         }
     }
@@ -236,11 +238,10 @@ impl Client {
     /// See [10.3 Switch To Window](https://www.w3.org/TR/webdriver1/#switch-to-window) of the
     /// WebDriver standard.
     #[cfg_attr(docsrs, doc(alias = "Switch To Window"))]
-    pub async fn switch_to_window(
-        &mut self,
-        window: webdriver::common::WebWindow,
-    ) -> Result<(), error::CmdError> {
-        let params = SwitchToWindowParameters { handle: window.0 };
+    pub async fn switch_to_window(&mut self, window: WindowHandle) -> Result<(), error::CmdError> {
+        let params = webdriver::command::SwitchToWindowParameters {
+            handle: window.into(),
+        };
         let _res = self.issue(WebDriverCommand::SwitchToWindow(params)).await?;
         Ok(())
     }
@@ -250,13 +251,13 @@ impl Client {
     /// See [10.4 Get Window Handles](https://www.w3.org/TR/webdriver1/#get-window-handles) of the
     /// WebDriver standard.
     #[cfg_attr(docsrs, doc(alias = "Get Window Handles"))]
-    pub async fn windows(&mut self) -> Result<Vec<webdriver::common::WebWindow>, error::CmdError> {
+    pub async fn windows(&mut self) -> Result<Vec<WindowHandle>, error::CmdError> {
         let res = self.issue(WebDriverCommand::GetWindowHandles).await?;
         match res {
             Json::Array(handles) => handles
                 .into_iter()
                 .map(|handle| match handle {
-                    Json::String(x) => Ok(webdriver::common::WebWindow(x)),
+                    Json::String(x) => Ok(x.try_into()?),
                     v => Err(error::CmdError::NotW3C(v)),
                 })
                 .collect::<Result<Vec<_>, _>>(),
@@ -278,32 +279,30 @@ impl Client {
     /// See [11.5 New Window](https://w3c.github.io/webdriver/#dfn-new-window) of the editor's
     /// draft standard.
     #[cfg_attr(docsrs, doc(alias = "New Window"))]
-    pub async fn new_window(
-        &mut self,
-        as_tab: bool,
-    ) -> Result<webdriver::response::NewWindowResponse, error::CmdError> {
+    pub async fn new_window(&mut self, as_tab: bool) -> Result<NewWindowResponse, error::CmdError> {
         let type_hint = if as_tab { "tab" } else { "window" }.to_string();
         let type_hint = Some(type_hint);
-        let params = NewWindowParameters { type_hint };
+        let params = webdriver::command::NewWindowParameters { type_hint };
         match self.issue(WebDriverCommand::NewWindow(params)).await? {
             Json::Object(mut obj) => {
                 let handle = match obj
                     .remove("handle")
-                    .and_then(|x| x.as_str().map(String::from))
+                    .and_then(|x| x.as_str().map(WindowHandle::try_from))
                 {
-                    Some(handle) => handle,
+                    Some(Ok(handle)) => handle,
+                    _ => return Err(error::CmdError::NotW3C(Json::Object(obj))),
+                };
+
+                let typ = match obj.get("type").and_then(|x| x.as_str()) {
+                    Some(typ) => match typ {
+                        "tab" => NewWindowType::Tab,
+                        "window" => NewWindowType::Window,
+                        _ => return Err(error::CmdError::NotW3C(Json::Object(obj))),
+                    },
                     None => return Err(error::CmdError::NotW3C(Json::Object(obj))),
                 };
 
-                let typ = match obj
-                    .remove("type")
-                    .and_then(|x| x.as_str().map(String::from))
-                {
-                    Some(typ) => typ,
-                    None => return Err(error::CmdError::NotW3C(Json::Object(obj))),
-                };
-
-                Ok(webdriver::response::NewWindowResponse { handle, typ })
+                Ok(NewWindowResponse { handle, typ })
             }
             v => Err(error::CmdError::NotW3C(v)),
         }
@@ -315,7 +314,7 @@ impl Client {
     /// WebDriver standard.
     #[cfg_attr(docsrs, doc(alias = "Switch To Frame"))]
     pub async fn enter_frame(mut self, index: Option<u16>) -> Result<Client, error::CmdError> {
-        let params = SwitchToFrameParameters {
+        let params = webdriver::command::SwitchToFrameParameters {
             id: index.map(FrameId::Short),
         };
         self.issue(WebDriverCommand::SwitchToFrame(params)).await?;
@@ -456,7 +455,7 @@ impl Client {
     /// standard.
     #[cfg_attr(docsrs, doc(alias = "Find Element"))]
     pub async fn find(&mut self, search: Locator<'_>) -> Result<Element, error::CmdError> {
-        self.by(search.into()).await
+        self.by(search.into_parameters()).await
     }
 
     /// Find all elements on the page that match the given [`Locator`].
@@ -466,7 +465,7 @@ impl Client {
     #[cfg_attr(docsrs, doc(alias = "Find Elements"))]
     pub async fn find_all(&mut self, search: Locator<'_>) -> Result<Vec<Element>, error::CmdError> {
         let res = self
-            .issue(WebDriverCommand::FindElements(search.into()))
+            .issue(WebDriverCommand::FindElements(search.into_parameters()))
             .await?;
         let array = self.parse_lookup_all(res)?;
         Ok(array
@@ -503,7 +502,7 @@ impl Client {
     ///
     /// Through the returned `Form`, HTML forms can be filled out and submitted.
     pub async fn form(&mut self, search: Locator<'_>) -> Result<Form, error::CmdError> {
-        let l = search.into();
+        let l = search.into_parameters();
         let res = self.issue(WebDriverCommand::FindElement(l)).await?;
         let f = self.parse_lookup(res)?;
         Ok(Form {
@@ -646,6 +645,10 @@ impl Client {
     /// While this currently just spins and yields, it may be more efficient than this in the
     /// future. In particular, in time, it may only run `is_ready` again when an event occurs on
     /// the page.
+    #[deprecated(
+        since = "0.17.5",
+        note = "This method might block forever. Please use client.wait().on(...) instead. You can still wait forever using: client.wait().forever().on(...)"
+    )]
     pub async fn wait_for<F, FF>(&mut self, mut is_ready: F) -> Result<(), error::CmdError>
     where
         F: FnMut(&mut Client) -> FF,
@@ -661,21 +664,12 @@ impl Client {
     /// While this currently just spins and yields, it may be more efficient than this in the
     /// future. In particular, in time, it may only run `is_ready` again when an event occurs on
     /// the page.
+    #[deprecated(
+        since = "0.17.5",
+        note = "This method might block forever. Please use client.wait().on(locator) instead. You can still wait forever using: client.wait().forever().on(locator)"
+    )]
     pub async fn wait_for_find(&mut self, search: Locator<'_>) -> Result<Element, error::CmdError> {
-        let s: webdriver::command::LocatorParameters = search.into();
-        loop {
-            match self
-                .by(webdriver::command::LocatorParameters {
-                    using: s.using,
-                    value: s.value.clone(),
-                })
-                .await
-            {
-                Ok(v) => break Ok(v),
-                Err(error::CmdError::NoSuchElement(_)) => {}
-                Err(e) => break Err(e),
-            }
-        }
+        self.wait().forever().for_element(search).await
     }
 
     /// Wait for the page to navigate to a new URL before proceeding.
@@ -683,6 +677,10 @@ impl Client {
     /// If the `current` URL is not provided, `self.current_url()` will be used. Note however that
     /// this introduces a race condition: the browser could finish navigating *before* we call
     /// `current_url()`, which would lead to an eternal wait.
+    #[deprecated(
+        since = "0.17.5",
+        note = "This method might block forever and has a chance of randomly blocking. Please use client.wait().on(url) instead, to check if you navigated successfully to the new URL."
+    )]
     pub async fn wait_for_navigation(
         &mut self,
         current: Option<url::Url>,
@@ -692,6 +690,7 @@ impl Client {
             None => self.current_url_().await?,
         };
 
+        #[allow(deprecated)]
         self.wait_for(move |c| {
             // TODO: get rid of this clone
             let current = current.clone();
@@ -817,9 +816,39 @@ impl Client {
     }
 }
 
+/// Allow to wait for conditions.
+impl Client {
+    /// Starting building a new wait operation. This can be used to wait for a certain condition, by
+    /// periodically checking the state and optionally returning a value:
+    ///
+    /// ```no_run
+    /// # use fantoccini::{ClientBuilder, Locator};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), fantoccini::error::CmdError> {
+    /// # #[cfg(all(feature = "native-tls", not(feature = "rustls-tls")))]
+    /// # let mut client = ClientBuilder::native().connect("http://localhost:4444").await.expect("failed to connect to WebDriver");
+    /// # #[cfg(feature = "rustls-tls")]
+    /// # let mut client = ClientBuilder::rustls().connect("http://localhost:4444").await.expect("failed to connect to WebDriver");
+    /// # #[cfg(all(not(feature = "native-tls"), not(feature = "rustls-tls")))]
+    /// # let mut client: fantoccini::Client = unreachable!("no tls provider available");
+    /// // -- snip wrapper code --
+    /// let button = client.wait().for_element(Locator::Css(
+    ///     r#"a.button-download[href="/learn/get-started"]"#,
+    /// )).await?;
+    /// // -- snip wrapper code --
+    /// # client.close().await
+    /// # }
+    /// ```
+    ///
+    /// Also see: [`crate::wait`].
+    pub fn wait(&mut self) -> Wait<'_> {
+        Wait::new(self)
+    }
+}
+
 /// Helper methods
 impl Client {
-    async fn by(
+    pub(crate) async fn by(
         &mut self,
         locator: webdriver::command::LocatorParameters,
     ) -> Result<Element, error::CmdError> {
@@ -897,4 +926,14 @@ impl Client {
             }
         }
     }
+}
+
+/// Response returned by [`Client::new_window()`] method.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NewWindowResponse {
+    /// Handle to the created browser window.
+    pub handle: WindowHandle,
+
+    /// Type of the created browser window.
+    pub typ: NewWindowType,
 }

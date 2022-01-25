@@ -43,7 +43,7 @@ impl From<WebDriverCookie> for Cookie<'static> {
         }
 
         if let Some(expiry) = webdriver_cookie.expiry {
-            let dt = OffsetDateTime::from_unix_timestamp(expiry as i64);
+            let dt = OffsetDateTime::from_unix_timestamp(expiry as i64).ok();
             cookie.set_expires(dt);
         }
 
@@ -59,7 +59,9 @@ impl<'a> From<Cookie<'a>> for WebDriverCookie {
         let domain = cookie.domain().map(String::from);
         let secure = cookie.secure();
         let http_only = cookie.http_only();
-        let expiry = cookie.expires().map(|dt| dt.unix_timestamp() as u64);
+        let expiry = cookie
+            .expires()
+            .and_then(|e| e.datetime().map(|dt| dt.unix_timestamp() as u64));
 
         Self {
             name,
@@ -95,8 +97,13 @@ impl Client {
     ///
     /// See [16.2 Get Named Cookie](https://www.w3.org/TR/webdriver1/#get-named-cookie) of the
     /// WebDriver standard.
-    pub async fn get_named_cookie(&mut self, name: &str) -> Result<Cookie<'static>, error::CmdError> {
-        let resp = self.issue(WebDriverCommand::GetNamedCookie(name.to_string())).await?;
+    pub async fn get_named_cookie(
+        &mut self,
+        name: &str,
+    ) -> Result<Cookie<'static>, error::CmdError> {
+        let resp = self
+            .issue(WebDriverCommand::GetNamedCookie(name.to_string()))
+            .await?;
         let webdriver_cookie: WebDriverCookie = serde_json::from_value(resp)?;
         Ok(webdriver_cookie.into())
     }
