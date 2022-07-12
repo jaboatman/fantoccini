@@ -97,6 +97,15 @@ pub enum CmdError {
     /// ["no such alert"]: https://www.w3.org/TR/webdriver/#dfn-no-such-alert
     NoSuchAlert(WebDriver),
 
+    /// The requested operation could not be performed because an unexpected Alert window was
+    /// opened.
+    ///
+    /// This variant lifts the ["unexpected alert"] error variant from `Standard` to simplify
+    /// checking for it in user code.
+    ///
+    /// ["unexpected alert"]: https://www.w3.org/TR/webdriver/#dfn-unexpected-alert-open
+    UnexpectedAlert(WebDriver),
+
     /// A bad URL was encountered during parsing.
     ///
     /// This normally happens if a link is clicked or the current URL is requested, but the URL in
@@ -177,6 +186,10 @@ impl CmdError {
                 error: webdriver::ErrorStatus::NoSuchAlert,
                 ..
             } => CmdError::NoSuchAlert(WebDriver::from_upstream_error(e)),
+            webdriver::WebDriverError {
+                error: webdriver::ErrorStatus::UnexpectedAlertOpen,
+                ..
+            } => CmdError::UnexpectedAlert(WebDriver::from_upstream_error(e)),
             _ => CmdError::Standard(WebDriver::from_upstream_error(e)),
         }
     }
@@ -189,6 +202,7 @@ impl Error for CmdError {
             CmdError::NoSuchElement(..) => "no element found matching selector",
             CmdError::NoSuchWindow(..) => "no window is currently selected",
             CmdError::NoSuchAlert(..) => "no alert is currently visible",
+            CmdError::UnexpectedAlert(..) => "unexpected alert window opened",
             CmdError::BadUrl(..) => "bad url provided",
             CmdError::Failed(..) => "webdriver could not be reached",
             CmdError::Lost(..) => "webdriver connection lost",
@@ -206,7 +220,8 @@ impl Error for CmdError {
             CmdError::Standard(ref e)
             | CmdError::NoSuchElement(ref e)
             | CmdError::NoSuchWindow(ref e)
-            | CmdError::NoSuchAlert(ref e) => Some(e),
+            | CmdError::NoSuchAlert(ref e)
+            | CmdError::UnexpectedAlert(ref e) => Some(e),
             CmdError::BadUrl(ref e) => Some(e),
             CmdError::Failed(ref e) => Some(e),
             CmdError::Lost(ref e) => Some(e),
@@ -228,6 +243,7 @@ impl fmt::Display for CmdError {
             CmdError::Standard(ref e)
             | CmdError::NoSuchElement(ref e)
             | CmdError::NoSuchWindow(ref e)
+            | CmdError::UnexpectedAlert(ref e)
             | CmdError::NoSuchAlert(ref e) => write!(f, "{}", e),
             CmdError::BadUrl(ref e) => write!(f, "{}", e),
             CmdError::Failed(ref e) => write!(f, "{}", e),
