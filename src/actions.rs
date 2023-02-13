@@ -279,6 +279,11 @@ impl KeyActions {
     pub fn push(&mut self, action: KeyAction) {
         self.actions.push(action);
     }
+
+    /// Return the underlying sequence of actions.
+    pub fn get_actions(&self) -> &[KeyAction] {
+        &self.actions
+    }
 }
 
 impl From<KeyActions> for ActionSequence {
