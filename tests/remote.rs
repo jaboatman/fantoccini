@@ -159,22 +159,25 @@ async fn window_rect_inner(c: Client) -> Result<(), error::CmdError> {
 }
 
 async fn finds_all_inner(c: Client) -> Result<(), error::CmdError> {
-    // go to the Wikipedia frontpage this time
-    c.goto("https://en.wikipedia.org/").await?;
-    let es = c.find_all(Locator::Css("#p-interaction li")).await?;
-    let texts = futures_util::future::try_join_all(
-        es.into_iter()
-            .take(4)
-            .map(|e| async move { e.text().await }),
-    )
-    .await?;
+    // go to the Wikipedia frontpage
+    c.goto("https://en.wikipedia.org/wiki/Main_Page").await?;
+    // Find all the footer links
+    let es = c.find_all(Locator::Css("#footer-places li")).await?;
+    let mut texts =
+        futures_util::future::try_join_all(es.into_iter().map(|e| async move { e.text().await }))
+            .await?;
+    texts.retain(|t| !t.is_empty());
     assert_eq!(
         texts,
         [
-            "Help",
-            "Learn to edit",
-            "Community portal",
-            "Recent changes"
+            "Privacy policy",
+            "About Wikipedia",
+            "Disclaimers",
+            "Contact Wikipedia",
+            "Mobile view",
+            "Developers",
+            "Statistics",
+            "Cookie statement"
         ]
     );
 
@@ -183,33 +186,39 @@ async fn finds_all_inner(c: Client) -> Result<(), error::CmdError> {
 
 async fn finds_sub_elements(c: Client) -> Result<(), error::CmdError> {
     // Go to the Wikipedia front page
-    c.goto("https://en.wikipedia.org/").await?;
-    // Get the main sidebar panel
-    let panel = c.find(Locator::Css("div#mw-panel")).await?;
-    // Get all the ul elements in the sidebar
-    let mut portals = panel.find_all(Locator::Css("nav.portal")).await?;
+    c.goto("https://en.wikipedia.org/wiki/Main_Page").await?;
+    // Get the main footer
+    let footer = c.find(Locator::Css("#footer-places")).await?;
+    // Get all the li place elements in the footer
+    let mut places = footer.find_all(Locator::Css("li")).await?;
 
-    let portal_titles = &[
-        // Because GetElementText (used by Element::text()) returns the text
-        // *as rendered*, hidden elements return an empty String.
-        "",
-        "Contribute",
-        "Tools",
-        "Print/export",
-        "In other projects",
-        "Languages",
+    let place_titles = &[
+        "Privacy policy",
+        "About Wikipedia",
+        "Disclaimers",
+        "Contact Wikipedia",
+        "Mobile view",
+        "Developers",
+        "Statistics",
+        "Cookie statement",
     ];
-    // Unless something fundamentally changes, this should work
-    assert_eq!(portals.len(), portal_titles.len());
+    // There's sometimes a hidden "edit preview settings" link in the footer.
+    assert!(
+        places.len() >= place_titles.len(),
+        "{} >= {}",
+        places.len(),
+        place_titles.len()
+    );
 
-    for (i, portal) in portals.iter_mut().enumerate() {
-        // Each "portal" has an h3 element.
-        let portal_title = portal.find(Locator::Css("h3")).await?;
-        let portal_title = portal_title.text().await?;
-        assert_eq!(portal_title, portal_titles[i]);
-        // And also an <ul>.
-        let list_entries = portal.find_all(Locator::Css("li")).await?;
-        assert!(!list_entries.is_empty());
+    for (i, place) in places.iter_mut().enumerate() {
+        // Each "place" has a link element.
+        let place_title = place.find(Locator::Css("a")).await?;
+        let place_title = place_title.text().await?;
+        if place_title.is_empty() {
+            assert!(i >= place_titles.len(), "{} >= {}", i, place_titles.len());
+        } else {
+            assert_eq!(place_title, place_titles[i]);
+        }
     }
 
     c.close().await
@@ -283,6 +292,14 @@ async fn handle_cookies_test(c: Client) -> Result<(), error::CmdError> {
     // Delete the cookie and make sure it's gone
     c.delete_cookie(cookie.name()).await?;
     assert!(c.get_named_cookie(cookie.name()).await.is_err());
+
+    // Verify same_site None corner-case is correctly parsed
+    cookie.set_same_site(None);
+    c.add_cookie(cookie.clone()).await?;
+    assert_eq!(
+        c.get_named_cookie(cookie.name()).await?.same_site(),
+        Some(SameSite::None)
+    );
 
     c.delete_all_cookies().await?;
     let cookies = c.get_all_cookies().await?;

@@ -1,4 +1,5 @@
 use crate::cookies::AddCookieParametersWrapper;
+use crate::error::ErrorStatus;
 use crate::wd::WebDriverCompatibleCommand;
 use crate::{error, Client};
 use futures_core::ready;
@@ -14,8 +15,6 @@ use std::task::Context;
 use std::task::Poll;
 use tokio::sync::{mpsc, oneshot};
 use webdriver::command::WebDriverCommand;
-use webdriver::error::ErrorStatus;
-use webdriver::error::WebDriverError;
 
 type Ack = oneshot::Sender<Result<Json, error::CmdError>>;
 
@@ -263,7 +262,10 @@ impl WebDriverCompatibleCommand for Wcmd {
                 body = Some(serde_json::to_string(params).unwrap());
                 method = Method::POST;
             }
-
+            WebDriverCommand::Print(ref params) => {
+                body = Some(serde_json::to_string(params).unwrap());
+                method = Method::POST;
+            }
             _ => {}
         }
         (method, body)
@@ -624,7 +626,9 @@ where
         // https://www.w3.org/TR/webdriver/#dfn-new-session
         // https://www.w3.org/TR/webdriver/#capabilities
         //  - we want the browser to wait for the page to load
-        cap.insert("pageLoadStrategy".to_string(), Json::from("normal"));
+        if !cap.contains_key("pageLoadStrategy") {
+            cap.insert("pageLoadStrategy".to_string(), Json::from("normal"));
+        }
 
         // make chrome comply with w3c
         cap.entry("goog:chromeOptions".to_string())
@@ -740,8 +744,12 @@ where
             );
         }
 
+        let json_mime: mime::Mime = "application/json; charset=utf-8"
+            .parse::<mime::Mime>()
+            .unwrap_or(mime::APPLICATION_JSON);
+
         let req = if let Some(body) = body.take() {
-            req = req.header(hyper::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref());
+            req = req.header(hyper::header::CONTENT_TYPE, json_mime.as_ref());
             req = req.header(hyper::header::CONTENT_LENGTH, body.len());
             self.client.request(req.body(body.into()).unwrap())
         } else {
@@ -866,80 +874,29 @@ where
                         return Err(error::CmdError::NotW3C(Json::Object(body)));
                     }
 
-                    use hyper::StatusCode;
-                    let error = body["error"].as_str().unwrap();
-                    match status {
-                        StatusCode::BAD_REQUEST => match error {
-                            "element click intercepted" => ErrorStatus::ElementClickIntercepted,
-                            "element not selectable" => ErrorStatus::ElementNotSelectable,
-                            "element not interactable" => ErrorStatus::ElementNotInteractable,
-                            "insecure certificate" => ErrorStatus::InsecureCertificate,
-                            "invalid argument" => ErrorStatus::InvalidArgument,
-                            "invalid cookie domain" => ErrorStatus::InvalidCookieDomain,
-                            "invalid coordinates" => ErrorStatus::InvalidCoordinates,
-                            "invalid element state" => ErrorStatus::InvalidElementState,
-                            "invalid selector" => ErrorStatus::InvalidSelector,
-                            "no such alert" => ErrorStatus::NoSuchAlert,
-                            "no such frame" => ErrorStatus::NoSuchFrame,
-                            "no such window" => ErrorStatus::NoSuchWindow,
-                            "stale element reference" => ErrorStatus::StaleElementReference,
-                            _ => unreachable!(
-                                "received unknown error ({}) for BAD_REQUEST status code",
-                                error
-                            ),
-                        },
-                        StatusCode::NOT_FOUND => match error {
-                            "unknown command" => ErrorStatus::UnknownCommand,
-                            "no such cookie" => ErrorStatus::NoSuchCookie,
-                            "invalid session id" => ErrorStatus::InvalidSessionId,
-                            "no such element" => ErrorStatus::NoSuchElement,
-                            "no such window" => ErrorStatus::NoSuchWindow,
-                            "no such alert" => ErrorStatus::NoSuchAlert,
-                            "stale element reference" => ErrorStatus::NoSuchElement,
-                            _ => unreachable!(
-                                "received unknown error ({}) for NOT_FOUND status code",
-                                error
-                            ),
-                        },
-                        StatusCode::INTERNAL_SERVER_ERROR => match error {
-                            "javascript error" => ErrorStatus::JavascriptError,
-                            "move target out of bounds" => ErrorStatus::MoveTargetOutOfBounds,
-                            "session not created" => ErrorStatus::SessionNotCreated,
-                            "unable to set cookie" => ErrorStatus::UnableToSetCookie,
-                            "unable to capture screen" => ErrorStatus::UnableToCaptureScreen,
-                            "unexpected alert open" => ErrorStatus::UnexpectedAlertOpen,
-                            "unknown error" => ErrorStatus::UnknownError,
-                            "script timeout" => ErrorStatus::ScriptTimeout,
-                            "unsupported operation" => ErrorStatus::UnsupportedOperation,
-                            "timeout" => ErrorStatus::Timeout,
-                            _ => unreachable!(
-                                "received unknown error ({}) for INTERNAL_SERVER_ERROR status code",
-                                error
-                            ),
-                        },
-                        StatusCode::REQUEST_TIMEOUT => match error {
-                            "timeout" => ErrorStatus::Timeout,
-                            "script timeout" => ErrorStatus::ScriptTimeout,
-                            _ => unreachable!(
-                                "received unknown error ({}) for REQUEST_TIMEOUT status code",
-                                error
-                            ),
-                        },
-                        StatusCode::METHOD_NOT_ALLOWED => match error {
-                            "unknown method" => ErrorStatus::UnknownMethod,
-                            _ => unreachable!(
-                                "received unknown error ({}) for METHOD_NOT_ALLOWED status code",
-                                error
-                            ),
-                        },
-                        _ => unreachable!("received unknown status code: {}", status),
+                    match body["error"].as_str() {
+                        Some(s) => s.parse()?,
+                        None => return Err(error::CmdError::NotW3C(Json::Object(body))),
                     }
                 };
 
-                let message = body["message"].as_str().unwrap().to_string();
-                Err(error::CmdError::from_webdriver_error(WebDriverError::new(
-                    es, message,
-                )))
+                let message = match body.remove("message") {
+                    Some(Json::String(x)) => x,
+                    _ => String::new(),
+                };
+
+                let mut wd_error = error::WebDriver::new(es, message);
+
+                // Add the stacktrace if there is one.
+                if let Some(Json::String(x)) = body.remove("stacktrace") {
+                    wd_error = wd_error.with_stacktrace(x);
+                }
+
+                // Some commands may annotate errors with extra data.
+                if let Some(x) = body.remove("data") {
+                    wd_error = wd_error.with_data(x);
+                }
+                Err(error::CmdError::from_webdriver_error(wd_error))
             });
 
         Either::Left(f)

@@ -111,10 +111,13 @@ impl<'a> From<Cookie<'a>> for WebDriverCookie {
         let expiry = cookie
             .expires()
             .and_then(|e| e.datetime().map(|dt| dt.unix_timestamp() as u64));
-        let same_site = cookie.same_site().map(|x| match x {
-            SameSite::Strict => "Strict".to_string(),
-            SameSite::Lax => "Lax".to_string(),
-            SameSite::None => "None".to_string(),
+        let same_site = Some(match cookie.same_site() {
+            Some(x) => match x {
+                SameSite::Strict => "Strict".to_string(),
+                SameSite::Lax => "Lax".to_string(),
+                SameSite::None => "None".to_string(),
+            },
+            None => "None".to_string(),
         });
 
         Self {
@@ -140,12 +143,10 @@ impl Client {
         let resp = self.issue(WebDriverCommand::GetCookies).await?;
 
         let webdriver_cookies: Vec<WebDriverCookie> = serde_json::from_value(resp)?;
-        let cookies: Result<Vec<Cookie<'static>>, error::CmdError> = webdriver_cookies
+        webdriver_cookies
             .into_iter()
             .map(|raw_cookie| raw_cookie.try_into())
-            .collect();
-
-        Ok(cookies?)
+            .collect()
     }
 
     /// Get a single named cookie associated with the current document.
@@ -157,7 +158,7 @@ impl Client {
             .issue(WebDriverCommand::GetNamedCookie(name.to_string()))
             .await?;
         let webdriver_cookie: WebDriverCookie = serde_json::from_value(resp)?;
-        Ok(webdriver_cookie.try_into()?)
+        webdriver_cookie.try_into()
     }
 
     /// Add the specified cookie.

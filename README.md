@@ -28,12 +28,12 @@ A quick way to get one is to run [`geckodriver`] at the command line.
 Let's start out clicking around on Wikipedia:
 
 ```rust
-use fantoccini::{Client, Locator};
+use fantoccini::{ClientBuilder, Locator};
 
 // let's set up the sequence of steps we want the browser to take
 #[tokio::main]
 async fn main() -> Result<(), fantoccini::error::CmdError> {
-    let c = Client::new("http://localhost:4444").await.expect("failed to connect to WebDriver");
+    let c = ClientBuilder::native().connect("http://localhost:4444").await.expect("failed to connect to WebDriver");
 
     // first, go to the Wikipedia page for Foobar
     c.goto("https://en.wikipedia.org/wiki/Foobar").await?;
@@ -65,7 +65,7 @@ let f = c.form(Locator::Css("#search-form")).await?;
 f.set_by_name("search", "foobar").await?
  .submit().await?;
 
-// we should now have ended up in the rigth place
+// we should now have ended up in the right place
 let url = c.current_url().await?;
 assert_eq!(url.as_ref(), "https://en.wikipedia.org/wiki/Foobar");
 
@@ -94,7 +94,7 @@ let pixels = raw
     })
     .await
     .map_err(fantoccini::error::CmdError::from)?;
-// and voilla, we now have the bytes for the Wikipedia logo!
+// and voilà, we now have the bytes for the Wikipedia logo!
 assert!(pixels.len() > 0);
 println!("Wikipedia logo is {}b", pixels.len());
 
