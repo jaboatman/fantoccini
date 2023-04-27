@@ -717,13 +717,11 @@ impl Client {
         &self,
         actions: impl Into<Actions>,
     ) -> Result<(), error::CmdError> {
-        let params = crate::wd::extensions::ActionsParameters {
+        let params = webdriver::command::ActionsParameters {
             actions: actions.into().sequences.into_iter().map(|x| x.0).collect(),
         };
 
-        let cmd = crate::wd::extensions::ExtendedActionCommand { actions: params };
-
-        self.issue_cmd(cmd).await?;
+        self.issue(WebDriverCommand::PerformActions(params)).await?;
         Ok(())
     }
 

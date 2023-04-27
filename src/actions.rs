@@ -190,8 +190,8 @@ impl PointerAction {
                 WDActions::PointerAction::Move(WDActions::PointerMoveAction {
                     duration: duration.map(|x| x.as_millis() as u64),
                     origin: WDActions::PointerOrigin::Pointer,
-                    x: Some(x),
-                    y: Some(y),
+                    x,
+                    y,
                     ..Default::default()
                 }),
             ),
@@ -199,8 +199,8 @@ impl PointerAction {
                 WDActions::PointerAction::Move(WDActions::PointerMoveAction {
                     duration: duration.map(|x| x.as_millis() as u64),
                     origin: WDActions::PointerOrigin::Viewport,
-                    x: Some(x),
-                    y: Some(y),
+                    x,
+                    y,
                     ..Default::default()
                 }),
             ),
@@ -213,8 +213,8 @@ impl PointerAction {
                 WDActions::PointerMoveAction {
                     duration: duration.map(|x| x.as_millis() as u64),
                     origin: WDActions::PointerOrigin::Element(element.element),
-                    x: Some(x),
-                    y: Some(y),
+                    x,
+                    y,
                     ..Default::default()
                 },
             )),
@@ -474,13 +474,11 @@ impl WheelActions {
 
 impl From<WheelActions> for ActionSequence {
     fn from(wa: WheelActions) -> Self {
-        ActionSequence(crate::wd::extensions::ActionSequence {
+        ActionSequence(WDActions::ActionSequence {
             id: wa.id,
-            actions: crate::wd::extensions::ActionsType::Extension(
-                crate::wd::extensions::ActionExtension::Wheel {
-                    actions: wa.actions.into_iter().map(|x| x.into_item()).collect(),
-                },
-            ),
+            actions: WDActions::ActionsType::Wheel {
+                actions: wa.actions.into_iter().map(|x| x.into_item()).collect(),
+            },
         })
     }
 }
@@ -489,7 +487,6 @@ impl From<WheelActions> for ActionSequence {
 ///
 /// See [15.4.4 Wheel Actions](https://www.w3.org/TR/webdriver/#wheel-actions) of the
 /// WebDriver standard.
-
 #[derive(Debug, Clone)]
 pub enum WheelAction {
     /// Pause action.
@@ -514,9 +511,9 @@ pub enum WheelAction {
 }
 
 impl WheelAction {
-    fn into_item(self) -> crate::wd::extensions::WheelActionItem {
+    fn into_item(self) -> WDActions::WheelActionItem {
         match self {
-            WheelAction::Pause { duration } => crate::wd::extensions::WheelActionItem::General(
+            WheelAction::Pause { duration } => WDActions::WheelActionItem::General(
                 WDActions::GeneralAction::Pause(WDActions::PauseAction {
                     duration: Some(duration.as_millis() as u64),
                 }),
@@ -527,18 +524,16 @@ impl WheelAction {
                 delta_x,
                 delta_y,
                 duration,
-            } => crate::wd::extensions::WheelActionItem::Wheel(
-                crate::wd::extensions::WheelAction::Scroll(
-                    crate::wd::extensions::WheelScrollAction {
-                        origin: crate::wd::extensions::WheelOrigin::Viewport,
-                        duration: duration.map(|d| d.as_millis() as u64),
-                        x,
-                        y,
-                        delta_x,
-                        delta_y,
-                    },
-                ),
-            ),
+            } => WDActions::WheelActionItem::Wheel(WDActions::WheelAction::Scroll(
+                WDActions::WheelScrollAction {
+                    duration: duration.map(|d| d.as_millis() as u64),
+                    origin: WDActions::PointerOrigin::Viewport,
+                    x: Some(x),
+                    y: Some(y),
+                    deltaX: Some(delta_x),
+                    deltaY: Some(delta_y),
+                },
+            )),
         }
     }
 }
@@ -547,7 +542,7 @@ impl WheelAction {
 ///
 /// See the documentation for [`Actions`] for more details.
 #[derive(Debug)]
-pub struct ActionSequence(pub(crate) crate::wd::extensions::ActionSequence);
+pub struct ActionSequence(pub(crate) WDActions::ActionSequence);
 
 /// A source capable of providing inputs for a browser action chain.
 ///
